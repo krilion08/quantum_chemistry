@@ -4,4 +4,4 @@ go to /src
 
 ## test
 
-./read.x ../examples/<molecule>.dat
+>./read.x ../examples/<molecule>.dat
