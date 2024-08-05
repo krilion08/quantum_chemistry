@@ -66,14 +66,14 @@ int main(int argc, char* argv[])
         }
         cout << endl;
     }
-    cout << "\nReaded Hessian:\n" << H << std::endl;
+    cout << "\nReaded Hessian:\n" << H << endl;
 
     // mass-weighten the hessian
     for (int i=0; i<3*mol->natom; ++i)
         for (int j=0; j<3*mol->natom; ++j) {
             H(i, j) /= sqrt(masses.at(mol->zvals[i/3]) * masses.at(mol->zvals[j/3]));
         }
-    cout << "\nMass-weighten Hessian:\n" << H << std::endl;
+    cout << "\nMass-weighten Hessian:\n" << H << endl;
 
     // compute eigenvalues
     Eigen::SelfAdjointEigenSolver<Matrix> solver(H);
