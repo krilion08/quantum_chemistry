@@ -90,6 +90,9 @@ int read_4d(const string &filename, double**** V) {
 
 int main(int argc, char* argv[])
 {
+    double conv_e = 1e-10;
+    double conv_d = 1e-9;
+    int max_iter = 100;
     
     if (argc != 2){
         cerr << "Usage: " << argv[0] << " <./example/folder/>" << endl;
@@ -118,8 +121,8 @@ int main(int argc, char* argv[])
         std::cerr << "Error opening file: " << folder + "enuc.dat" << std::endl;
         return 1;
     }
-    double enuc;
-    input >> enuc;
+    double Enuc;
+    input >> Enuc;
     input.close();
 
     // get number of rows in upper triangular form
@@ -192,6 +195,7 @@ int main(int argc, char* argv[])
 
     Matrix F_init = S_inv_sq.transpose() * H_core * S_inv_sq;
 
+    
     // diagonalize Fock matrix to get orbitals and their energies
     solver.compute(F_init);
     Vector e_init = solver.eigenvalues();
@@ -210,37 +214,130 @@ int main(int argc, char* argv[])
             }
         }
     }
-    cout << S_inv_sq << endl; 
+    
     // Compute SCF energy
-    Matrix H_core_plus_F = H_core + F_init;
-    double Eelec = Dens.cwiseProduct(H_core_plus_F).sum();
+    double Eelec = 0.0;
 
+    // Iterate over all elements of the matrices
+    for (int mu = 0; mu < Dens.rows(); ++mu) {
+        for (int nu = 0; nu < Dens.cols(); ++nu) {
+            Eelec += Dens(mu, nu) * (H_core(mu, nu) + F_init(mu, nu));
+        }
+    }
+    double Etotal = Eelec + Enuc;
+    printf("Iteration 0, energy: %12.6f\n", Etotal);
 
+    Matrix Dens_old = Dens;
+    double Eelec_old = Eelec;
     Matrix F = H_core;
-    for (int i=0; i<n; ++i) {
-        for (int j=0; j<n; ++j) {
-            for (int k=0; k<n; ++k) {
-                for (int l=0; k<n; ++k) {
-                    F(i, j) += Dens(k, l) * (2 * int2e[i][j][k][l] - int2e[i][k][j][l]);
+    Matrix C(F.rows(), F.rows());
+    int num_iter = 0;
+    Vector orb_e(F.rows());
+
+    while (true) {
+        ++num_iter;
+        // Form new Fock matrix
+        F = H_core;
+        for (int i=0; i<n; ++i) {
+            for (int j=0; j<n; ++j) {
+                for (int k=0; k<n; ++k) {
+                    for (int l=0; l<n; ++l) {
+                        F(i, j) += Dens(k, l) * (2 * int2e[i][j][k][l] - int2e[i][k][j][l]);
+                    }
                 }
             }
         }
+
+        // Form new density matrix
+        F = S_inv_sq.transpose() * F * S_inv_sq;
+        solver.compute(F);
+        orb_e = solver.eigenvalues();  // diagonalize Fock matrix in orthogonal basis
+        Matrix C_prime = solver.eigenvectors();
+        C = S_inv_sq * C_prime;
+        Dens.setZero();
+        for (int m=0; m<nocc; ++m) {
+            for (int i=0; i<n; ++i) {
+                for (int j=0; j<n; ++j) {
+                    Dens(i, j) += C(i, m) * C(j, m);
+                }
+            }
+        }
+        // Compute new SCF energy
+        Eelec = 0.0;
+        for (int mu = 0; mu < Dens.rows(); ++mu) {
+            for (int nu = 0; nu < Dens.rows(); ++nu) {
+                Eelec += Dens(mu, nu) * (H_core(mu, nu) + F(mu, nu));
+            }
+        }
+        
+        Etotal = Eelec + Enuc;
+
+        // Check for convergence
+        double rmsd = 0;
+        for (int mu = 0; mu < Dens.cols(); ++mu) {
+            for (int nu = 0; nu < Dens.rows(); ++nu) {
+                rmsd += pow(Dens(mu, nu) - Dens_old(mu, nu), 2);
+            }
+        }
+        rmsd = sqrt(rmsd);
+        printf("Iteration %d, energy: %16.10f, density matrix rmsd: %16.10f\n", num_iter, Etotal, rmsd);
+
+        if (abs(Eelec_old-Eelec) < conv_e && rmsd < conv_d) {
+            break;
+        }
+        Dens_old = Dens;
+        Eelec_old = Eelec;
+
+        // Exit if not converged        
+        if (num_iter == max_iter) {
+            cout << "Self consisted field did not converged" << endl;
+            for (int i = 0; i < n; ++i) {
+                for (int j = 0; j < n; ++j) {
+                    for (int k = 0; k < n; ++k) {
+                        delete[] int2e[i][j][k];
+                    }
+                    delete[] int2e[i][j];
+                }
+                delete[] int2e[i];
+            }
+            delete[] int2e;
+            return 1;
+        }
     }
+
+    cout << "Succesfull convergence in " << num_iter << " iterations" << endl;
+    cout << orb_e << endl;
     
-
-
-
-
-
-    // // deallocate
-    // for (int i=0; i<n; ++i) {
-    //     delete[] S[i];
-    //     delete[] T[i];
-    //     delete[] V[i];
+    // transform Fock matrix to MO basis
+    Matrix F_mo(F.rows(), F.rows());
+    F_mo.setZero();
+    // for (int i = 0; i<F_mo.rows(); ++i) {
+    //     for (int j = 0; j < F_mo.rows(); ++j) {
+    //         for (int mu = 0; mu < F_mo.rows(); ++mu) {
+    //             for (int nu = 0; nu < F_mo.rows(); ++nu) {
+    //                 F_mo(i, j) += C(j, mu) * C(i, nu) * F(mu, nu);
+    //             }
+    //         }
+    //     }
     // }
-    // delete[] S;
-    // delete[] T;
-    // delete[] V;
+    F_mo = C.transpose() * F * C;
+    cout << F << endl;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     // deallocate 2 electron integrals
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) {
